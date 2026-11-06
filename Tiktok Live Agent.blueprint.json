@@ -1,0 +1,1146 @@
+{
+    "name": "Tiktok Live Agent",
+    "flow": [
+        {
+            "id": 1,
+            "module": "gateway:CustomWebHook",
+            "version": 1,
+            "parameters": {
+                "hook": 3708617,
+                "maxResults": 30
+            },
+            "mapper": {},
+            "metadata": {
+                "designer": {
+                    "x": -331,
+                    "y": 13,
+                    "name": "Batch Input - TikTok LIVE Webhook"
+                },
+                "restore": {
+                    "parameters": {
+                        "hook": {
+                            "data": {
+                                "editable": "true"
+                            },
+                            "label": "My gateway-webhook webhook"
+                        }
+                    }
+                },
+                "parameters": [
+                    {
+                        "name": "hook",
+                        "type": "hook:gateway-webhook",
+                        "label": "Webhook",
+                        "required": true
+                    },
+                    {
+                        "name": "maxResults",
+                        "type": "number",
+                        "label": "Maximum number of results"
+                    }
+                ],
+                "interface": [
+                    {
+                        "name": "user_id",
+                        "type": "text"
+                    },
+                    {
+                        "name": "nickname",
+                        "type": "text"
+                    },
+                    {
+                        "name": "comment",
+                        "type": "text"
+                    },
+                    {
+                        "name": "room_id",
+                        "type": "text"
+                    }
+                ],
+                "advanced": true
+            }
+        },
+        {
+            "id": 2,
+            "module": "builtin:BasicAggregator",
+            "version": 1,
+            "parameters": {
+                "feeder": 1
+            },
+            "mapper": {
+                "properties": {
+                    "comment": "{{1.comment}}",
+                    "room_id": "{{1.room_id}}",
+                    "user_id": "{{1.user_id}}",
+                    "nickname": "{{1.nickname}}",
+                    "comment_id": "{{1.comment_id}}",
+                    "created_time": "{{1.created_time}}",
+                    "previous_user_window": "{{1.previous_user_window}}"
+                }
+            },
+            "metadata": {
+                "designer": {
+                    "x": 95,
+                    "y": 20,
+                    "name": "Aggregate up to 50 Comments"
+                },
+                "restore": {
+                    "extra": {
+                        "feeder": {
+                            "label": "Batch Input - TikTok LIVE Webhook [1]"
+                        }
+                    }
+                },
+                "expect": [
+                    {
+                        "name": "properties",
+                        "type": "collection",
+                        "label": "Comment fields"
+                    }
+                ]
+            }
+        },
+        {
+            "id": 19,
+            "module": "json:TransformToJSON",
+            "version": 1,
+            "parameters": {
+                "space": ""
+            },
+            "mapper": {
+                "object": "{{2.array}}"
+            },
+            "metadata": {
+                "designer": {
+                    "x": 337,
+                    "y": 0,
+                    "name": "Serialize Batch as JSON"
+                }
+            }
+        },
+        {
+            "id": 3,
+            "module": "deepseek-ai:createAChatCompletion",
+            "version": 1,
+            "parameters": {
+                "__IMTCONN__": 10820320
+            },
+            "mapper": {
+                "model": "deepseek-flash",
+                "top_p": "1",
+                "messages": [
+                    {
+                        "role": "system",
+                        "content": "You are Elarmne's TikTok LIVE Customer and Marketing Intelligence Agent. Process one entire comment batch and produce actionable insight for the host, CS team, and marketing team.\n\nCORE CONTRACT\n- Process the ENTIRE batch in ONE AI call. Never analyze comments through separate AI calls.\n- The batch contains up to 50 comments. Every current comment must be represented in exactly one customer_case.\n- Group current comments with the same user_id into ONE customer_case per unique user in the current batch.\n- Use previous_user_window as historical context, but never count previous comments in comment_count, related_comment_count, or any current-batch statistics.\n- Preserve raw data exactly: do not rewrite comment text, change comment_id, invent user names, product names, quantities, prices, promotion codes, or benefits.\n\nINPUT\nThe user message contains:\n- RUN_ID: the current run identifier.\n- BATCH_COMMENTS_JSON: a JSON array. Each item contains comment_id, user_id, nickname, comment, room_id, created_time, and previous_user_window.\n\nGROUPING AND RAW TRACEABILITY\n- Use user_id as the primary key. If user_id is empty, use nickname as a temporary key and lower confidence.\n- In each customer_case:\n  - comment_ids: join all current comment_ids for that user with \"; \".\n  - raw_comments: join all current comments verbatim in chronological order with \" || \".\n  - previous_user_window: preserve the supplied window; use an empty string when absent.\n- A user may have multiple needs. Choose the dominant intent, include all meaningful aspects, and explain secondary needs in aspect_recommendations and recommended_action.\n- Do not create a customer_case from previous_user_window alone when the user has no current comment.\n\nSENTIMENT\nUse exactly one value:\n- POSITIVE: praise, satisfaction, confirmed good experience, liking, or readiness to buy again.\n- NEUTRAL: request for information, how-to question, price question, shipping question, social greeting, or no clear emotion.\n- NEGATIVE: complaint, disappointment, doubt, request for resolution, or any safety signal such as itching, burning, redness, swelling, allergy, acne, irritation, counterfeit/fake product, accusation, or serious complaint.\n- If a user's current comments contain a safety signal, choose NEGATIVE even if other comments are positive.\n- If positive and negative signals coexist without safety, choose the label that reflects the most important issue requiring action and explain it in priority_reason.\n\nCUSTOMER INTENT\nChoose exactly one primary intent:\n- Inquiry: pre-purchase information or product-fit question.\n- Price: price, live price, or discounted price question.\n- Promotion: voucher, code, gift, bundle, or offer question.\n- Logistics: shipping fee/time, order, tracking, exchange, or return question.\n- Evaluation: post-use praise or criticism of quality, effect, or experience.\n- Host: addressing the host or commenting on the host's advice/presentation.\n- Chat: greeting, social interaction, or comment without a clear purchase/CS need.\n- Other: none of the above or insufficient evidence.\n\nASPECT_LABELS\nChoose one or more and join them with \"; \":\n- Product Information: ingredients, benefits, suitability, purpose, or usage.\n- Product Experience: feel, effectiveness, quality, texture, smell, or result after use.\n- Safety: itching, burning, redness, swelling, allergy, acne, irritation, counterfeit/fake product, or safety warning.\n- Price: list price, live price, or discounted price.\n- Promotion: voucher, bundle, gift, code, or offer.\n- Logistics: shipping, order, delivery, exchange, or return.\n- Host: host, advice, or livestream presentation.\n- Engagement: greeting, host praise, social proof, or audience interaction.\n- Other: aspect cannot be determined.\n\nPRIORITY\nUse an integer from 1 to 5:\n- 5: safety/possible skin reaction; itching, burning, redness, swelling, allergy, acne, irritation; counterfeit/fake product; serious accusation/complaint; or a case requiring immediate human attention.\n- 4: negative logistics, price, order complaint, or repeated/unresolved issue.\n- 3: inquiry, price/promotion question, neutral logistics, or unclear evaluation.\n- 2: positive evaluation, host, chat, or positive engagement.\n- 1: other or no clear need.\n- If any safety signal appears in current comments or directly relevant previous_user_window, priority MUST be 5.\n- If several signals exist, use the highest priority. priority_reason must state the main reason using only available evidence.\n\nCUSTOMER AND CS RECOMMENDATIONS\n- Create response_scenario for every customer_case. Use one of: SAFETY_ESCALATION, NEGATIVE_EXPERIENCE, PRICE_INQUIRY, PROMOTION_INQUIRY, LOGISTICS_SUPPORT, PRODUCT_INFORMATION, POSITIVE_SOCIAL_PROOF, HOST_SUPPORT, GENERAL_ENGAGEMENT, or HUMAN_REVIEW.\n- For NEGATIVE, write a customer-specific response: polite, empathetic, and concise. Do not admit fault for the brand, promise compensation, or make a medical diagnosis. If a possible skin reaction is mentioned, advise pausing use and moving to inbox/CS for private review. Do not request personal information publicly.\n- For POSITIVE, create marketing_content_idea based only on the praise/experience in raw_comments and create host_pin_instruction asking the host to consider pinning it as social proof after human review. Do not invent product claims or numbers.\n- For Price/Promotion, promotion_suggestion may recommend only an offer type to verify, such as checking the current live offer, a trial bundle, or a new-customer voucher. Never invent a price, discount percentage, code, gift, or free-shipping benefit. If no promotion database is provided, write NEED_PROMOTION_DATABASE.\n- For each aspect, write aspect_recommendations in this compact form: \"Aspect: insight -> recommendation\". Example: \"Safety: possible irritation -> send to CS privately; Price: price question -> host confirms the current live price.\"\n- recommended_action must be a concrete next action for CS, host, or marketing. Every public response, pin action, and safety action requires human review.\n\nHOST EVENTS\n- Create host_events for meaningful current-batch patterns: many users asking about the same aspect/product, many price questions, strong purchase interest, or high-priority cases.\n- Each summary must be a short live briefing beginning with the exact RUN_ID. Use only counts from current comments; never count previous_user_window.\n- related_users should contain relevant nicknames or user_ids. related_comment_count is the number of current comments relevant to this event.\n- pin_recommendation may recommend pinning only a POSITIVE comment after human review. Never recommend pinning negative, safety, or unverified information.\n- If there is no meaningful pattern, return an empty host_events array.\n\nCONFIDENCE AND BATCH SUMMARY\n- confidence must be exactly \"cao\", \"trung binh\", or \"thap\". Use \"thap\" for very short, ambiguous, or context-poor comments.\n- batch_summary.run_id must equal the input RUN_ID exactly.\n- batch_summary.comment_count is the number of items in BATCH_COMMENTS_JSON.\n- batch_summary.unique_user_count is the number of unique users in the current batch.\n- batch_summary.high_priority_count is the number of customer_cases with priority >= 4.\n- top_aspects contains the dominant current-batch aspects joined with \"; \".\n- event_summary and host_action are concise and evidence-based.\n\nOUTPUT CONTRACT\n- Write all free-text fields, customer_response, marketing_content_idea, recommendations, summaries, reasons, and instructions in Vietnamese. Keep only the required enum labels in their exact English or specified values.\n- Return exactly ONE valid JSON object, with no markdown, code fence, or text outside the JSON.\n- Always return every key below. Use an empty string when not applicable; never omit keys.\n- customer_cases must contain exactly one case for each unique user with a current comment.\n- comment_ids, raw_comments, and previous_user_window must preserve traceability for downstream CS/marketing review.\n- customer_response, marketing_content_idea, host_pin_instruction, and promotion_suggestion may be empty when not applicable.\n\nREQUIRED JSON SHAPE\n{\"customer_cases\":[{\"user_id\":\"\",\"nickname\":\"\",\"comment_ids\":\"\",\"raw_comments\":\"\",\"previous_user_window\":\"\",\"sentiment\":\"NEUTRAL\",\"intent\":\"Other\",\"aspect_labels\":\"\",\"priority\":1,\"priority_reason\":\"\",\"confidence\":\"trung binh\",\"response_scenario\":\"\",\"customer_response\":\"\",\"marketing_content_idea\":\"\",\"host_pin_instruction\":\"\",\"promotion_suggestion\":\"\",\"aspect_recommendations\":\"\",\"recommended_action\":\"\",\"user_window_update\":\"\"}],\"host_events\":[{\"event_type\":\"\",\"summary\":\"\",\"related_users\":\"\",\"related_comment_count\":0,\"aspect\":\"\",\"priority\":1,\"host_instruction\":\"\",\"pin_recommendation\":\"\"}],\"batch_summary\":{\"run_id\":\"\",\"comment_count\":0,\"unique_user_count\":0,\"high_priority_count\":0,\"top_aspects\":\"\",\"event_summary\":\"\",\"host_action\":\"\"}}"
+                    },
+                    {
+                        "role": "user",
+                        "content": "RUN_ID: run-{{formatDate(now; \"YYYYMMDD-HHmmss\")}}\nBATCH_COMMENTS_JSON:\n{{19.json}}"
+                    }
+                ],
+                "thinking": true,
+                "max_tokens": "300000",
+                "temperature": "0.2",
+                "response_format": {
+                    "type": "text"
+                },
+                "reasoning_effort": "high"
+            },
+            "metadata": {
+                "designer": {
+                    "x": 600,
+                    "y": 0,
+                    "name": "AI Agent - DeepSeek Native (1 Batch)"
+                },
+                "restore": {
+                    "expect": {
+                        "stop": {
+                            "mode": "chose"
+                        },
+                        "model": {
+                            "mode": "chose",
+                            "label": "deepseek-flash"
+                        },
+                        "logprobs": {
+                            "mode": "chose"
+                        },
+                        "messages": {
+                            "mode": "chose",
+                            "items": [
+                                {
+                                    "role": {
+                                        "mode": "chose",
+                                        "label": "System"
+                                    }
+                                },
+                                {
+                                    "role": {
+                                        "mode": "chose",
+                                        "label": "User"
+                                    }
+                                }
+                            ]
+                        },
+                        "thinking": {
+                            "mode": "chose"
+                        },
+                        "response_format": {
+                            "nested": {
+                                "type": {
+                                    "mode": "chose",
+                                    "label": "Text"
+                                }
+                            }
+                        },
+                        "reasoning_effort": {
+                            "mode": "chose",
+                            "label": "High"
+                        }
+                    },
+                    "parameters": {
+                        "__IMTCONN__": {
+                            "data": {
+                                "scoped": "true",
+                                "connection": "deepseek-ai"
+                            },
+                            "label": "tường's DeepSeek AI connection"
+                        }
+                    }
+                },
+                "parameters": [
+                    {
+                        "name": "__IMTCONN__",
+                        "type": "account:deepseek-ai",
+                        "label": "Connection",
+                        "required": true
+                    }
+                ],
+                "expect": [
+                    {
+                        "name": "messages",
+                        "spec": [
+                            {
+                                "name": "role",
+                                "type": "select",
+                                "label": "Role",
+                                "dynamic": true,
+                                "options": [
+                                    {
+                                        "label": "User",
+                                        "value": "user"
+                                    },
+                                    {
+                                        "label": "System",
+                                        "value": "system"
+                                    },
+                                    {
+                                        "label": "Assistant",
+                                        "value": "assistant"
+                                    }
+                                ],
+                                "required": true
+                            },
+                            {
+                                "name": "content",
+                                "type": "text",
+                                "label": "Content",
+                                "required": true
+                            },
+                            {
+                                "name": "name",
+                                "type": "text",
+                                "label": "Name"
+                            }
+                        ],
+                        "type": "array",
+                        "label": "Messages",
+                        "required": true
+                    },
+                    {
+                        "name": "model",
+                        "type": "select",
+                        "label": "Model",
+                        "required": true
+                    },
+                    {
+                        "name": "max_tokens",
+                        "type": "number",
+                        "label": "Max Tokens",
+                        "validate": {
+                            "max": 393216,
+                            "min": 1
+                        }
+                    },
+                    {
+                        "name": "thinking",
+                        "type": "boolean",
+                        "label": "Thinking"
+                    },
+                    {
+                        "name": "reasoning_effort",
+                        "type": "select",
+                        "label": "Reasoning Effort",
+                        "validate": {
+                            "enum": [
+                                "high",
+                                "max"
+                            ]
+                        }
+                    },
+                    {
+                        "name": "temperature",
+                        "type": "number",
+                        "label": "Temperature",
+                        "validate": {
+                            "max": 2,
+                            "min": 0
+                        }
+                    },
+                    {
+                        "name": "response_format",
+                        "spec": [
+                            {
+                                "name": "type",
+                                "type": "select",
+                                "label": "Type",
+                                "validate": {
+                                    "enum": [
+                                        "text",
+                                        "json_object"
+                                    ]
+                                }
+                            }
+                        ],
+                        "type": "collection",
+                        "label": "Response Format"
+                    },
+                    {
+                        "name": "stop",
+                        "spec": {
+                            "name": "value",
+                            "type": "text"
+                        },
+                        "type": "array",
+                        "label": "Stop"
+                    },
+                    {
+                        "name": "top_p",
+                        "type": "number",
+                        "label": "Top P",
+                        "validate": {
+                            "max": 1,
+                            "min": 0
+                        }
+                    },
+                    {
+                        "name": "logprobs",
+                        "type": "boolean",
+                        "label": "Logprobs"
+                    },
+                    {
+                        "name": "top_logprobs",
+                        "type": "number",
+                        "label": "Top Logprobs",
+                        "validate": {
+                            "max": 20,
+                            "min": 0
+                        }
+                    },
+                    {
+                        "name": "tools",
+                        "type": "any",
+                        "label": "Tools"
+                    },
+                    {
+                        "name": "tool_choice",
+                        "type": "any",
+                        "label": "Tool Choice"
+                    },
+                    {
+                        "name": "user_id",
+                        "type": "text",
+                        "label": "User ID",
+                        "validate": {
+                            "max": 512,
+                            "pattern": "^[a-zA-Z0-9-_]+$"
+                        }
+                    }
+                ]
+            }
+        },
+        {
+            "id": 4,
+            "module": "json:ParseJSON",
+            "version": 1,
+            "parameters": {},
+            "mapper": {
+                "json": "{{3.choices[].message.content}}"
+            },
+            "metadata": {
+                "designer": {
+                    "x": 900,
+                    "y": 0,
+                    "name": "Parse DeepSeek Batch JSON"
+                },
+                "restore": {},
+                "parameters": [
+                    {
+                        "name": "type",
+                        "type": "udt",
+                        "label": "Data structure"
+                    }
+                ],
+                "expect": [
+                    {
+                        "name": "json",
+                        "type": "text",
+                        "label": "JSON string",
+                        "required": true
+                    }
+                ]
+            }
+        },
+        {
+            "id": 5,
+            "module": "google-sheets:addRow",
+            "version": 2,
+            "parameters": {
+                "__IMTCONN__": 10816164
+            },
+            "mapper": {
+                "from": "drive",
+                "mode": "select",
+                "values": {
+                    "0": "run-{{formatDate(now; \"YYYYMMDD-HHmmss\")}}",
+                    "1": "{{now}}",
+                    "2": "{{4.batch_summary.comment_count}}",
+                    "3": "{{4.batch_summary.unique_user_count}}",
+                    "4": "{{4.batch_summary.high_priority_count}}",
+                    "5": "{{4.batch_summary.top_aspects}}",
+                    "6": "{{4.batch_summary.event_summary}}",
+                    "7": "{{4.batch_summary.host_action}}"
+                },
+                "sheetId": "Run Summary",
+                "spreadsheetId": "/1ePWfYvyLw5IgpS2BcOgpg8p9YHYGTul_WUfJ4L8pDJU",
+                "includesHeaders": true,
+                "insertDataOption": "INSERT_ROWS",
+                "useColumnHeaders": false,
+                "valueInputOption": "USER_ENTERED",
+                "insertUnformatted": false
+            },
+            "metadata": {
+                "designer": {
+                    "x": 1200,
+                    "y": 0,
+                    "name": "Action - Save Run Summary"
+                },
+                "restore": {
+                    "expect": {
+                        "from": {
+                            "label": "My Drive"
+                        },
+                        "mode": {
+                            "label": "Search by path"
+                        },
+                        "sheetId": {
+                            "label": "Run Summary"
+                        },
+                        "spreadsheetId": {
+                            "path": [
+                                "Tiktok Live"
+                            ]
+                        },
+                        "includesHeaders": {
+                            "label": "Yes"
+                        },
+                        "insertDataOption": {
+                            "mode": "chose",
+                            "label": "Insert rows"
+                        },
+                        "useColumnHeaders": {
+                            "label": "No"
+                        },
+                        "valueInputOption": {
+                            "mode": "chose",
+                            "label": "User entered"
+                        },
+                        "insertUnformatted": {
+                            "mode": "chose"
+                        }
+                    },
+                    "parameters": {
+                        "__IMTCONN__": {
+                            "data": {
+                                "scoped": "true",
+                                "connection": "google"
+                            },
+                            "label": "tường's Google connection (tuongtran.525102180024@st.ueh.edu.vn)"
+                        }
+                    }
+                },
+                "parameters": [
+                    {
+                        "name": "__IMTCONN__",
+                        "type": "account:google",
+                        "label": "Connection",
+                        "required": true
+                    }
+                ],
+                "expect": [
+                    {
+                        "name": "mode",
+                        "type": "select",
+                        "label": "Search Method",
+                        "required": true,
+                        "validate": {
+                            "enum": [
+                                "select",
+                                "fromAll",
+                                "map"
+                            ]
+                        }
+                    },
+                    {
+                        "name": "insertUnformatted",
+                        "type": "boolean",
+                        "label": "Unformatted",
+                        "required": true
+                    },
+                    {
+                        "name": "valueInputOption",
+                        "type": "select",
+                        "label": "Value input option",
+                        "required": true,
+                        "validate": {
+                            "enum": [
+                                "USER_ENTERED",
+                                "RAW"
+                            ]
+                        }
+                    },
+                    {
+                        "name": "insertDataOption",
+                        "type": "select",
+                        "label": "Insert data option",
+                        "validate": {
+                            "enum": [
+                                "INSERT_ROWS",
+                                "OVERWRITE"
+                            ]
+                        }
+                    },
+                    {
+                        "name": "from",
+                        "type": "select",
+                        "label": "Drive",
+                        "required": true,
+                        "validate": {
+                            "enum": [
+                                "drive",
+                                "share",
+                                "team"
+                            ]
+                        }
+                    },
+                    {
+                        "name": "spreadsheetId",
+                        "type": "file",
+                        "label": "Spreadsheet Name",
+                        "required": true
+                    },
+                    {
+                        "name": "sheetId",
+                        "type": "select",
+                        "label": "Sheet Name",
+                        "required": true
+                    },
+                    {
+                        "name": "includesHeaders",
+                        "type": "select",
+                        "label": "Table contains headers",
+                        "required": true,
+                        "validate": {
+                            "enum": [
+                                true,
+                                false
+                            ]
+                        }
+                    },
+                    {
+                        "name": "useColumnHeaders",
+                        "type": "select",
+                        "label": "Use column headers as IDs of the columns",
+                        "required": true,
+                        "validate": {
+                            "enum": [
+                                true,
+                                false
+                            ]
+                        }
+                    },
+                    {
+                        "name": "values",
+                        "spec": [
+                            {
+                                "name": "0",
+                                "type": "text",
+                                "label": "A"
+                            },
+                            {
+                                "name": "1",
+                                "type": "text",
+                                "label": "B"
+                            },
+                            {
+                                "name": "2",
+                                "type": "text",
+                                "label": "C"
+                            },
+                            {
+                                "name": "3",
+                                "type": "text",
+                                "label": "D"
+                            },
+                            {
+                                "name": "4",
+                                "type": "text",
+                                "label": "E"
+                            },
+                            {
+                                "name": "5",
+                                "type": "text",
+                                "label": "F"
+                            },
+                            {
+                                "name": "6",
+                                "type": "text",
+                                "label": "G"
+                            },
+                            {
+                                "name": "7",
+                                "type": "text",
+                                "label": "H"
+                            },
+                            {
+                                "name": "8",
+                                "type": "text",
+                                "label": "I"
+                            },
+                            {
+                                "name": "9",
+                                "type": "text",
+                                "label": "J"
+                            },
+                            {
+                                "name": "10",
+                                "type": "text",
+                                "label": "K"
+                            },
+                            {
+                                "name": "11",
+                                "type": "text",
+                                "label": "L"
+                            },
+                            {
+                                "name": "12",
+                                "type": "text",
+                                "label": "M"
+                            },
+                            {
+                                "name": "13",
+                                "type": "text",
+                                "label": "N"
+                            },
+                            {
+                                "name": "14",
+                                "type": "text",
+                                "label": "O"
+                            },
+                            {
+                                "name": "15",
+                                "type": "text",
+                                "label": "P"
+                            },
+                            {
+                                "name": "16",
+                                "type": "text",
+                                "label": "Q"
+                            },
+                            {
+                                "name": "17",
+                                "type": "text",
+                                "label": "R"
+                            },
+                            {
+                                "name": "18",
+                                "type": "text",
+                                "label": "S"
+                            },
+                            {
+                                "name": "19",
+                                "type": "text",
+                                "label": "T"
+                            },
+                            {
+                                "name": "20",
+                                "type": "text",
+                                "label": "U"
+                            },
+                            {
+                                "name": "21",
+                                "type": "text",
+                                "label": "V"
+                            },
+                            {
+                                "name": "22",
+                                "type": "text",
+                                "label": "W"
+                            },
+                            {
+                                "name": "23",
+                                "type": "text",
+                                "label": "X"
+                            },
+                            {
+                                "name": "24",
+                                "type": "text",
+                                "label": "Y"
+                            },
+                            {
+                                "name": "25",
+                                "type": "text",
+                                "label": "Z"
+                            }
+                        ],
+                        "type": "collection",
+                        "label": "Values in columns"
+                    }
+                ],
+                "advanced": true
+            }
+        },
+        {
+            "id": 6,
+            "module": "builtin:BasicRouter",
+            "version": 1,
+            "parameters": {},
+            "mapper": null,
+            "metadata": {
+                "designer": {
+                    "x": 1500,
+                    "y": 0,
+                    "name": "Decision - Split Batch Outputs"
+                }
+            },
+            "routes": [
+                {
+                    "flow": [
+                        {
+                            "id": 7,
+                            "module": "builtin:BasicFeeder",
+                            "version": 1,
+                            "parameters": {},
+                            "mapper": {
+                                "array": "{{4.customer_cases}}"
+                            },
+                            "metadata": {
+                                "designer": {
+                                    "x": 1780,
+                                    "y": -420,
+                                    "name": "Iterate Customer Cases"
+                                }
+                            }
+                        },
+                        {
+                            "id": 8,
+                            "module": "builtin:BasicRouter",
+                            "version": 1,
+                            "parameters": {},
+                            "mapper": null,
+                            "metadata": {
+                                "designer": {
+                                    "x": 2040,
+                                    "y": -420,
+                                    "name": "Decision - Customer Case Actions"
+                                }
+                            },
+                            "routes": [
+                                {
+                                    "flow": [
+                                        {
+                                            "id": 9,
+                                            "module": "google-sheets:addRow",
+                                            "version": 2,
+                                            "parameters": {
+                                                "__IMTCONN__": 10816164
+                                            },
+                                            "mapper": {
+                                                "from": "drive",
+                                                "mode": "select",
+                                                "values": {
+                                                    "0": "run-{{formatDate(now; \"YYYYMMDD-HHmmss\")}}",
+                                                    "1": "{{7.user_id}}",
+                                                    "2": "{{7.nickname}}",
+                                                    "3": "{{7.comment_ids}}",
+                                                    "4": "{{7.raw_comments}}",
+                                                    "5": "{{7.previous_user_window}}",
+                                                    "6": "{{7.sentiment}}",
+                                                    "7": "{{7.intent}}",
+                                                    "8": "{{7.aspect_labels}}",
+                                                    "9": "{{7.priority}}",
+                                                    "10": "{{7.priority_reason}}",
+                                                    "11": "{{7.confidence}}",
+                                                    "12": "{{7.response_scenario}}",
+                                                    "13": "{{7.customer_response}}",
+                                                    "14": "{{7.marketing_content_idea}}",
+                                                    "15": "{{7.host_pin_instruction}}",
+                                                    "16": "{{7.promotion_suggestion}}",
+                                                    "17": "{{7.aspect_recommendations}}",
+                                                    "18": "{{7.recommended_action}}",
+                                                    "19": "{{7.user_window_update}}",
+                                                    "20": "PENDING_HUMAN_REVIEW"
+                                                },
+                                                "sheetId": "Customer Cases",
+                                                "spreadsheetId": "/1ePWfYvyLw5IgpS2BcOgpg8p9YHYGTul_WUfJ4L8pDJU",
+                                                "includesHeaders": true,
+                                                "insertDataOption": "INSERT_ROWS",
+                                                "useColumnHeaders": false,
+                                                "valueInputOption": "USER_ENTERED",
+                                                "insertUnformatted": false
+                                            },
+                                            "metadata": {
+                                                "designer": {
+                                                    "x": 2320,
+                                                    "y": -720,
+                                                    "name": "Action - Save Customer Case"
+                                                }
+                                            }
+                                        }
+                                    ]
+                                },
+                                {
+                                    "flow": [
+                                        {
+                                            "id": 10,
+                                            "module": "google-sheets:addRow",
+                                            "version": 2,
+                                            "parameters": {
+                                                "__IMTCONN__": 10816164
+                                            },
+                                            "filter": {
+                                                "name": "Priority 4 or 5",
+                                                "conditions": [
+                                                    [
+                                                        {
+                                                            "a": "{{7.priority}}",
+                                                            "b": "3",
+                                                            "o": "number:greater"
+                                                        }
+                                                    ]
+                                                ]
+                                            },
+                                            "mapper": {
+                                                "from": "drive",
+                                                "mode": "select",
+                                                "values": {
+                                                    "0": "run-{{formatDate(now; \"YYYYMMDD-HHmmss\")}}",
+                                                    "1": "{{7.user_id}}",
+                                                    "2": "{{7.nickname}}",
+                                                    "3": "{{7.raw_comments}}",
+                                                    "4": "{{7.aspect_labels}}",
+                                                    "5": "{{7.priority}}",
+                                                    "6": "{{7.priority_reason}}",
+                                                    "7": "{{7.recommended_action}}",
+                                                    "8": "PENDING_HUMAN_REVIEW"
+                                                },
+                                                "sheetId": "Priority Queue",
+                                                "spreadsheetId": "/1ePWfYvyLw5IgpS2BcOgpg8p9YHYGTul_WUfJ4L8pDJU",
+                                                "includesHeaders": true,
+                                                "insertDataOption": "INSERT_ROWS",
+                                                "useColumnHeaders": false,
+                                                "valueInputOption": "USER_ENTERED",
+                                                "insertUnformatted": false
+                                            },
+                                            "metadata": {
+                                                "designer": {
+                                                    "x": 2320,
+                                                    "y": -480,
+                                                    "name": "Action - Save Priority Queue"
+                                                }
+                                            }
+                                        }
+                                    ]
+                                },
+                                {
+                                    "flow": [
+                                        {
+                                            "id": 11,
+                                            "module": "google-sheets:addRow",
+                                            "version": 2,
+                                            "parameters": {
+                                                "__IMTCONN__": 10816164
+                                            },
+                                            "filter": {
+                                                "name": "Negative - CS Response",
+                                                "conditions": [
+                                                    [
+                                                        {
+                                                            "a": "{{7.sentiment}}",
+                                                            "b": "NEGATIVE",
+                                                            "o": "text:equal:ci"
+                                                        }
+                                                    ]
+                                                ]
+                                            },
+                                            "mapper": {
+                                                "from": "drive",
+                                                "mode": "select",
+                                                "values": {
+                                                    "0": "run-{{formatDate(now; \"YYYYMMDD-HHmmss\")}}",
+                                                    "1": "{{7.user_id}}",
+                                                    "2": "{{7.nickname}}",
+                                                    "3": "{{7.raw_comments}}",
+                                                    "4": "{{7.response_scenario}}",
+                                                    "5": "{{7.aspect_labels}}",
+                                                    "6": "{{7.priority}}",
+                                                    "7": "{{7.priority_reason}}",
+                                                    "8": "{{7.customer_response}}",
+                                                    "9": "PENDING_HUMAN_REVIEW"
+                                                },
+                                                "sheetId": "Negative Responses",
+                                                "spreadsheetId": "/1ePWfYvyLw5IgpS2BcOgpg8p9YHYGTul_WUfJ4L8pDJU",
+                                                "includesHeaders": true,
+                                                "insertDataOption": "INSERT_ROWS",
+                                                "useColumnHeaders": false,
+                                                "valueInputOption": "USER_ENTERED",
+                                                "insertUnformatted": false
+                                            },
+                                            "metadata": {
+                                                "designer": {
+                                                    "x": 2320,
+                                                    "y": -240,
+                                                    "name": "Action - Save CS Response"
+                                                }
+                                            }
+                                        }
+                                    ]
+                                },
+                                {
+                                    "flow": [
+                                        {
+                                            "id": 12,
+                                            "module": "google-sheets:addRow",
+                                            "version": 2,
+                                            "parameters": {
+                                                "__IMTCONN__": 10816164
+                                            },
+                                            "filter": {
+                                                "name": "Positive - Host Pin and Content",
+                                                "conditions": [
+                                                    [
+                                                        {
+                                                            "a": "{{7.sentiment}}",
+                                                            "b": "POSITIVE",
+                                                            "o": "text:equal:ci"
+                                                        }
+                                                    ]
+                                                ]
+                                            },
+                                            "mapper": {
+                                                "from": "drive",
+                                                "mode": "select",
+                                                "values": {
+                                                    "0": "run-{{formatDate(now; \"YYYYMMDD-HHmmss\")}}",
+                                                    "1": "{{7.user_id}}",
+                                                    "2": "{{7.nickname}}",
+                                                    "3": "{{7.raw_comments}}",
+                                                    "4": "{{7.aspect_labels}}",
+                                                    "5": "{{7.marketing_content_idea}}",
+                                                    "6": "{{7.host_pin_instruction}}",
+                                                    "7": "{{7.recommended_action}}",
+                                                    "8": "PENDING_HOST_ACTION"
+                                                },
+                                                "sheetId": "Positive Content",
+                                                "spreadsheetId": "/1ePWfYvyLw5IgpS2BcOgpg8p9YHYGTul_WUfJ4L8pDJU",
+                                                "includesHeaders": true,
+                                                "insertDataOption": "INSERT_ROWS",
+                                                "useColumnHeaders": false,
+                                                "valueInputOption": "USER_ENTERED",
+                                                "insertUnformatted": false
+                                            },
+                                            "metadata": {
+                                                "designer": {
+                                                    "x": 2320,
+                                                    "y": 0,
+                                                    "name": "Action - Save Positive Content"
+                                                }
+                                            }
+                                        }
+                                    ]
+                                },
+                                {
+                                    "flow": [
+                                        {
+                                            "id": 13,
+                                            "module": "google-sheets:addRow",
+                                            "version": 2,
+                                            "parameters": {
+                                                "__IMTCONN__": 10816164
+                                            },
+                                            "mapper": {
+                                                "from": "drive",
+                                                "mode": "select",
+                                                "values": {
+                                                    "0": "{{7.user_id}}",
+                                                    "1": "{{7.nickname}}",
+                                                    "2": "run-{{formatDate(now; \"YYYYMMDD-HHmmss\")}}",
+                                                    "3": "{{7.raw_comments}}",
+                                                    "4": "{{7.sentiment}}",
+                                                    "5": "{{7.intent}}",
+                                                    "6": "{{7.aspect_labels}}",
+                                                    "7": "{{7.priority}}",
+                                                    "8": "{{7.user_window_update}}"
+                                                },
+                                                "sheetId": "User Windows",
+                                                "spreadsheetId": "/1ePWfYvyLw5IgpS2BcOgpg8p9YHYGTul_WUfJ4L8pDJU",
+                                                "includesHeaders": true,
+                                                "insertDataOption": "INSERT_ROWS",
+                                                "useColumnHeaders": false,
+                                                "valueInputOption": "USER_ENTERED",
+                                                "insertUnformatted": false
+                                            },
+                                            "metadata": {
+                                                "designer": {
+                                                    "x": 2320,
+                                                    "y": 240,
+                                                    "name": "Action - Save User Window"
+                                                }
+                                            }
+                                        }
+                                    ]
+                                },
+                                {
+                                    "flow": [
+                                        {
+                                            "id": 18,
+                                            "module": "google-sheets:addRow",
+                                            "version": 2,
+                                            "parameters": {
+                                                "__IMTCONN__": 10816164
+                                            },
+                                            "mapper": {
+                                                "from": "drive",
+                                                "mode": "select",
+                                                "values": {
+                                                    "0": "run-{{formatDate(now; \"YYYYMMDD-HHmmss\")}}",
+                                                    "1": "{{7.user_id}}",
+                                                    "2": "{{7.nickname}}",
+                                                    "3": "{{7.raw_comments}}",
+                                                    "4": "{{7.aspect_labels}}",
+                                                    "5": "{{7.aspect_recommendations}}",
+                                                    "6": "{{7.recommended_action}}"
+                                                },
+                                                "sheetId": "Aspect Recommendations",
+                                                "spreadsheetId": "/1ePWfYvyLw5IgpS2BcOgpg8p9YHYGTul_WUfJ4L8pDJU",
+                                                "includesHeaders": true,
+                                                "insertDataOption": "INSERT_ROWS",
+                                                "useColumnHeaders": false,
+                                                "valueInputOption": "USER_ENTERED",
+                                                "insertUnformatted": false
+                                            },
+                                            "metadata": {
+                                                "designer": {
+                                                    "x": 2320,
+                                                    "y": 480,
+                                                    "name": "Action - Save Aspect Recommendations"
+                                                }
+                                            }
+                                        }
+                                    ]
+                                }
+                            ]
+                        }
+                    ]
+                },
+                {
+                    "flow": [
+                        {
+                            "id": 14,
+                            "module": "builtin:BasicFeeder",
+                            "version": 1,
+                            "parameters": {},
+                            "mapper": {
+                                "array": "{{4.host_events}}"
+                            },
+                            "metadata": {
+                                "designer": {
+                                    "x": 1780,
+                                    "y": 420,
+                                    "name": "Iterate Host Events"
+                                }
+                            }
+                        },
+                        {
+                            "id": 15,
+                            "module": "google-sheets:addRow",
+                            "version": 2,
+                            "parameters": {
+                                "__IMTCONN__": 10816164
+                            },
+                            "mapper": {
+                                "from": "drive",
+                                "mode": "select",
+                                "values": {
+                                    "0": "run-{{formatDate(now; \"YYYYMMDD-HHmmss\")}}",
+                                    "1": "{{4.batch_summary.run_id}}",
+                                    "2": "{{14.event_type}}",
+                                    "3": "{{14.summary}}",
+                                    "4": "{{14.related_users}}",
+                                    "5": "{{14.related_comment_count}}",
+                                    "6": "{{14.aspect}}",
+                                    "7": "{{14.priority}}",
+                                    "8": "{{14.host_instruction}}",
+                                    "9": "{{14.pin_recommendation}}",
+                                    "10": "PENDING_HOST_ACTION"
+                                },
+                                "sheetId": "Host Live Events",
+                                "spreadsheetId": "/1ePWfYvyLw5IgpS2BcOgpg8p9YHYGTul_WUfJ4L8pDJU",
+                                "includesHeaders": true,
+                                "insertDataOption": "INSERT_ROWS",
+                                "useColumnHeaders": false,
+                                "valueInputOption": "USER_ENTERED",
+                                "insertUnformatted": false
+                            },
+                            "metadata": {
+                                "designer": {
+                                    "x": 2040,
+                                    "y": 420,
+                                    "name": "Action - Save Host Event"
+                                }
+                            }
+                        }
+                    ]
+                }
+            ]
+        }
+    ],
+    "metadata": {
+        "instant": false,
+        "version": 1,
+        "scenario": {
+            "roundtrips": 1,
+            "maxErrors": 3,
+            "autoCommit": true,
+            "sequential": false,
+            "slots": null,
+            "confidential": false,
+            "dataloss": false,
+            "dlq": false
+        },
+        "designer": {
+            "orphans": []
+        },
+        "zone": "eu1.make.com",
+        "notes": []
+    }
+}
